@@ -81,10 +81,10 @@ note). Login-gating stops strangers; it does not add capacity.
 - Configure systemd override (sudo systemctl edit ollama) to add:
   Environment="OLLAMA_HOST=0.0.0.0:11434"
   Environment="OLLAMA_KEEP_ALIVE=-1"
-  Environment="OLLAMA_NUM_PARALLEL=2"
+  Environment="OLLAMA_NUM_PARALLEL=1"
   Environment="OLLAMA_FLASH_ATTENTION=1"
   Environment="OLLAMA_KV_CACHE_TYPE=q8_0"
-  Environment="OLLAMA_CONTEXT_LENGTH=2048"
+  Environment="OLLAMA_CONTEXT_LENGTH=4096"
 - Reload and restart ollama
 - Pull only: hermes3:8b
 - Verify model stays loaded: ollama ps after running ollama run hermes3:8b "hi"
@@ -92,11 +92,13 @@ note). Login-gating stops strangers; it does not add capacity.
   Concurrency vs VRAM (6GB budget). hermes3:8b ~4.9GB resident leaves ~860MB
   headroom. KV-cache footprint = NUM_PARALLEL * CONTEXT_LENGTH, so the two
   settings trade against each other:
-    - par=1, ctx=4096 : 1 request at a time (others queue), long context, 100% GPU
-    - par=2, ctx=2048 : 2 concurrent requests, 100% GPU, shorter context  ← current
-    - par=2, ctx=4096 : 2 concurrent but ~8% spills to CPU (slower)
-  After any change, confirm `ollama ps` shows "100% GPU" (not "x%/y% CPU/GPU");
-  CPU spill means VRAM overcommit — reduce CONTEXT_LENGTH or NUM_PARALLEL.
+    - par=1, ctx=4096 : 1 request at a time (others queue), long context, 100% GPU  ← current
+    - par=2, ctx=2048 : 2 concurrent requests, 100% GPU, shorter context
+    - par=2, ctx=4096 : 2 concurrent but ~8% spills to CPU (slower) — verified, avoid
+  Chosen par=1/ctx=4096 for RAG: retrieved chunks need context room, and the
+  assistant is low-concurrency. After any change, confirm `ollama ps` shows
+  "100% GPU" (not "x%/y% CPU/GPU"); CPU spill means VRAM overcommit — reduce
+  CONTEXT_LENGTH or NUM_PARALLEL.
 
 ### 6. Docker Compose stack at /opt/stacks/ai/
 - Create /opt/stacks/ai/ owned by alienware user
