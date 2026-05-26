@@ -28,7 +28,7 @@ def main(argv=None) -> int:
     client = OpenWebUIClient(args.base_url, args.api_key)
     state = StateStore(Path(args.state))
     summary = ingest(adapter, client, state, args.knowledge_id)
-    logging.info("done: %s", summary)
+    logging.getLogger("jarvis_ingest").info("done: %s", summary)
     return 0
 
 

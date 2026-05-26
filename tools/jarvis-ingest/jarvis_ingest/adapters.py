@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import Iterable, Iterator, Optional
 
@@ -12,6 +13,9 @@ class FolderAdapter:
         self.extensions = set(extensions) if extensions else set(DEFAULT_EXTENSIONS)
 
     def iter_files(self) -> Iterator[Path]:
-        for path in sorted(self.root.rglob("*")):
-            if path.is_file() and path.suffix.lower() in self.extensions:
-                yield path
+        for dirpath, dirnames, filenames in os.walk(self.root, followlinks=False):
+            dirnames.sort()
+            for name in sorted(filenames):
+                p = Path(dirpath) / name
+                if p.suffix.lower() in self.extensions:
+                    yield p

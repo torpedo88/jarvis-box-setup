@@ -18,14 +18,17 @@ def test_state_store_tracks_changes(tmp_path):
     f = tmp_path / "doc.txt"
     f.write_text("v1")
     store = StateStore(state_path)
-    assert store.is_changed(f) is True          # never seen
-    store.update(f)
+    h = store.get_hash(f)
+    assert store.is_changed(f, h) is True          # never seen
+    store.update(f, h)
     store.save()
 
     reloaded = StateStore(state_path)
-    assert reloaded.is_changed(f) is False       # unchanged since recorded
+    h = reloaded.get_hash(f)
+    assert reloaded.is_changed(f, h) is False       # unchanged since recorded
     f.write_text("v2")
-    assert reloaded.is_changed(f) is True         # content changed
+    h = reloaded.get_hash(f)
+    assert reloaded.is_changed(f, h) is True         # content changed
 
 
 def test_state_persisted_as_json(tmp_path):
@@ -33,7 +36,7 @@ def test_state_persisted_as_json(tmp_path):
     f = tmp_path / "doc.txt"
     f.write_text("x")
     store = StateStore(state_path)
-    store.update(f)
+    store.update(f, store.get_hash(f))
     store.save()
     data = json.loads(state_path.read_text())
     assert str(f.resolve()) in data

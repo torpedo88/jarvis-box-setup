@@ -20,13 +20,16 @@ class StateStore:
         if self.path.exists():
             self._data = json.loads(self.path.read_text())
 
-    def is_changed(self, file_path: Path) -> bool:
-        key = str(Path(file_path).resolve())
-        return self._data.get(key) != file_hash(Path(file_path))
+    def get_hash(self, file_path: Path) -> str:
+        return file_hash(Path(file_path))
 
-    def update(self, file_path: Path) -> None:
+    def is_changed(self, file_path: Path, current_hash: str) -> bool:
         key = str(Path(file_path).resolve())
-        self._data[key] = file_hash(Path(file_path))
+        return self._data.get(key) != current_hash
+
+    def update(self, file_path: Path, current_hash: str) -> None:
+        key = str(Path(file_path).resolve())
+        self._data[key] = current_hash
 
     def save(self) -> None:
         self.path.write_text(json.dumps(self._data, indent=2))

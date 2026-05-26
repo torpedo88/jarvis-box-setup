@@ -12,16 +12,17 @@ def ingest(adapter, client, state, knowledge_id, retries: int = 2):
     """
     uploaded = skipped = failed = 0
     for path in adapter.iter_files():
-        if not state.is_changed(path):
+        current_hash = state.get_hash(path)
+        if not state.is_changed(path, current_hash):
             skipped += 1
             continue
         try:
-            file_id = _with_retries(lambda: client.upload_file(path), retries)
+            file_id = _with_retries(lambda p=path: client.upload_file(p), retries)
             _with_retries(
-                lambda: client.attach_file_to_knowledge(knowledge_id, file_id),
+                lambda kb=knowledge_id, fid=file_id: client.attach_file_to_knowledge(kb, fid),
                 retries,
             )
-            state.update(path)
+            state.update(path, current_hash)
             uploaded += 1
         except Exception as exc:  # noqa: BLE001 - log and continue, never crash batch
             log.warning("skip %s: %s", path, exc)
