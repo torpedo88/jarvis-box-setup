@@ -1,0 +1,4 @@
+tools/jarvis-ingest/.venv/
+tools/jarvis-ingest/.ingest-state.json
+__pycache__/
+.pytest_cache/
