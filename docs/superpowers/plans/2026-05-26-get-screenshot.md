@@ -8,6 +8,8 @@
 
 **Tech Stack:** bash, OpenSSH, Tailscale, systemd-tmpfiles. Spec: `docs/superpowers/specs/2026-05-26-screenshot-transfer-design.md`.
 
+> **STATUS: IMPLEMENTED 2026-05-26.** The script as built differs from the task code below in three ways discovered during execution — see "Implementation notes" at the bottom. The authoritative source is `skills/get-screenshot/` in this repo (installed to `~/.claude/skills/get-screenshot/`).
+
 > **Testing note:** This tool is SSH-dependent shell glue with no unit-test harness available on the box. Per-task verification uses real commands with expected output (the "test" steps) instead of a unit framework. Tasks 3–4 require the **Mac awake, on Tailscale, with at least one screenshot on the Desktop**.
 
 ## File Structure
@@ -488,3 +490,19 @@ Expected: `get-screenshot: can't reach Mac via 'doesnotexist' ...` friendly mess
 git add docs/superpowers/plans/2026-05-26-get-screenshot.md
 git commit -m "test: get-screenshot full end-to-end acceptance (task 7)"
 ```
+
+---
+
+## Implementation notes (post-build, 2026-05-26)
+
+Three issues surfaced during execution that changed the script from the task code above. The repo copy in `skills/get-screenshot/` is authoritative.
+
+1. **macOS TCC blocks SSH from `~/Desktop`.** `ssh mac 'ls ~/Desktop'` returns `Operation not permitted` — modern macOS denies the SSH daemon access to Desktop/Documents/Downloads without Full Disk Access. Resolution (user chose least-privilege): use a non-protected drop folder `~/Screenshots` instead. The macOS screenshot save-location set over SSH (`defaults write com.apple.screencapture location` + `killall SystemUIServer`) does **not** stick in the live GUI session — set it via the on-screen `Cmd+Shift+5 → Options → Save to` UI, or just drag any image into `~/Screenshots`.
+
+2. **SSH does not preserve argument boundaries.** `ssh mac bash -s -- "$path"` joins argv with spaces and the remote shell re-splits, so paths with spaces (every macOS screenshot) broke. Fix: base64-encode the path locally and `base64 -d` on the Mac (base64 has no characters the remote shell will re-split).
+
+3. **BSD `stat -f` emits literal `\t`, not tabs.** The `%m\t%z\t%N` format produced the literal string `\t`, breaking tab-based field parsing. Fix: use a space delimiter (`%m %z %N`) and parse with `read -r epoch size name` (epoch/size are numeric; name is the remainder, spaces preserved).
+
+**Scope change:** matcher broadened from `Screenshot*.png` to any recent image (`*.png *.jpg *.jpeg *.gif *.webp *.heic`, via `shopt -s nullglob nocaseglob`). `~/Screenshots` is now a general image drop folder, which is more robust than depending on the flaky macOS screenshot-location redirect. SKILL.md and the spec wording reflect this.
+
+**Verified:** end-to-end pull + Claude reads the image; `list`/`pull`/bad-index; tmpfiles aging proven with a genuinely-aged file (the naive `touch -d '2 days ago'` test gives a false negative because `touch` can't backdate ctime, and tmpfiles ages on the most-recent of atime/btime/ctime/mtime); unreachable-Mac friendly error.
