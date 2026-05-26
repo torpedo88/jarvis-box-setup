@@ -48,15 +48,55 @@ permanently as Jarvis brain. Will pair with Oracle Cloud A1 later.
   - allow from tailscale interface tailscale0
 - Enable ufw
 
+#### 4a. Public exposure via Tailscale Funnel (optional)
+Goal: reach Open WebUI from the public internet WITHOUT port-forwarding the
+router. Funnel relays public HTTPS through tailscaled to localhost:3000, so
+ufw stays deny-incoming, the home IP stays hidden, and TLS is auto-provisioned
+(Let's Encrypt) on the `*.ts.net` hostname.
+
+Prereqs (Tailscale admin console, browser — cannot be done from the shell):
+- DNS → enable MagicDNS + HTTPS Certificates.
+- Enable Funnel on the tailnet. `tailscale funnel 3000` prints a one-click
+  enable link (`https://login.tailscale.com/f/funnel?node=...`) if not yet on;
+  approving it adds the `funnel` nodeAttr to the ACL policy.
+
+Before exposing — lock down Open WebUI auth (it has no rate limiting):
+- Create the admin account first (signup must be ON for the first user).
+- Then DISABLE signup so the public cannot self-register. Persisted in the
+  app DB at config.ui.enable_signup. NOTE: editing webui.db while the container
+  runs gets clobbered on shutdown — stop the container, edit, start. Or toggle
+  in Admin Panel → Settings → Enable New Sign Ups.
+- Add users for others via Admin Panel → Users; send them URL + password.
+
+Bring it up:
+- `sudo tailscale funnel --bg 3000`   (needs root, or `tailscale set --operator=$USER` once)
+- Live at `https://<host>.<tailnet>.ts.net` ; config persists across reboot.
+- Take down: `sudo tailscale funnel --https=443 off`
+
+Reminder: the single GPU slot still bounds throughput (see Ollama concurrency
+note). Login-gating stops strangers; it does not add capacity.
+
 ### 5. Ollama + Hermes (the Jarvis brain)
 - Install Ollama via official install script: curl -fsSL https://ollama.com/install.sh | sh
 - Configure systemd override (sudo systemctl edit ollama) to add:
   Environment="OLLAMA_HOST=0.0.0.0:11434"
   Environment="OLLAMA_KEEP_ALIVE=-1"
-  Environment="OLLAMA_NUM_PARALLEL=1"
+  Environment="OLLAMA_NUM_PARALLEL=2"
+  Environment="OLLAMA_FLASH_ATTENTION=1"
+  Environment="OLLAMA_KV_CACHE_TYPE=q8_0"
+  Environment="OLLAMA_CONTEXT_LENGTH=2048"
 - Reload and restart ollama
 - Pull only: hermes3:8b
 - Verify model stays loaded: ollama ps after running ollama run hermes3:8b "hi"
+
+  Concurrency vs VRAM (6GB budget). hermes3:8b ~4.9GB resident leaves ~860MB
+  headroom. KV-cache footprint = NUM_PARALLEL * CONTEXT_LENGTH, so the two
+  settings trade against each other:
+    - par=1, ctx=4096 : 1 request at a time (others queue), long context, 100% GPU
+    - par=2, ctx=2048 : 2 concurrent requests, 100% GPU, shorter context  ← current
+    - par=2, ctx=4096 : 2 concurrent but ~8% spills to CPU (slower)
+  After any change, confirm `ollama ps` shows "100% GPU" (not "x%/y% CPU/GPU");
+  CPU spill means VRAM overcommit — reduce CONTEXT_LENGTH or NUM_PARALLEL.
 
 ### 6. Docker Compose stack at /opt/stacks/ai/
 - Create /opt/stacks/ai/ owned by alienware user
@@ -64,6 +104,27 @@ permanently as Jarvis brain. Will pair with Oracle Cloud A1 later.
   - open-webui: ghcr.io/open-webui/open-webui:main
     - port 3000:8080
     - env OLLAMA_BASE_URL=http://host.docker.internal:11434
+    - env BYPASS_MODEL_ACCESS_CONTROL=true
+      # Without this, non-admin users get an EMPTY model dropdown: base Ollama
+      # models pulled directly have no DB model entry, and default access
+      # control (BYPASS=false) hides un-shared models from non-admins. Setting
+      # true lets every authenticated account see/select all models — correct
+      # for a small trusted multi-user box. Verify: as a 'user' role,
+      # GET /api/models returns count > 0.
+    - env ENABLE_API_KEYS=true                       # PLURAL name; default False
+    - env USER_PERMISSIONS_FEATURES_API_KEYS=true    # let non-admins mint keys
+      # Users mint keys in Settings -> Account -> API Keys, then call via the
+      # OpenAI-compatible Ollama proxy:
+      #   POST /ollama/v1/chat/completions  (Bearer sk-... ; model hermes3:8b)
+      # GOTCHA: that /v1 handler does NOT honor BYPASS_MODEL_ACCESS_CONTROL for
+      # non-admins on UNREGISTERED base models -> returns 403 "Model not found".
+      # Fix: register hermes3:8b as a PUBLIC model so a real model row + public
+      # grant exist. As admin:
+      #   POST /api/v1/models/model/access/update
+      #     {"id":"hermes3:8b","name":"hermes3:8b",
+      #      "access_grants":[{"principal_type":"user","principal_id":"*","permission":"read"}]}
+      # (principal_id "*" = public read). After that, non-admin keys work on /v1.
+      # The /api/chat/completions path 400s on raw calls (needs a chat_id) — UI only.
     - extra_hosts: "host.docker.internal:host-gateway"
     - volume open-webui:/app/backend/data
     - restart: unless-stopped
@@ -98,3 +159,8 @@ permanently as Jarvis brain. Will pair with Oracle Cloud A1 later.
 10. tailscale status shows connected
 11. ufw status shows correct rules
 12. cat /etc/systemd/logind.conf | grep HandleLid → all set to ignore
+13. ollama ps shows hermes3:8b "100% GPU" (no CPU spill) after a prompt
+14. (if Funnel enabled) tailscale funnel status shows the ts.net host proxying
+    127.0.0.1:3000; curl -sw '%{http_code}' https://<host>.ts.net/ → 200
+15. (if public) GET https://<host>.ts.net/api/config → features.enable_signup
+    is false (public cannot self-register)
